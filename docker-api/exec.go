@@ -1,13 +1,14 @@
 package docker
 
 import (
+	"bytes"
 	"io"
-	"os"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/network"
+	"github.com/docker/docker/client"
 
 	"context"
 	"fmt"
@@ -27,7 +28,8 @@ type ExecOptions struct {
 //ExecResult return the execution results
 type ExecResult struct {
 	ID     string
-	Stdout string
+	Stdout *bytes.Buffer
+	Stderr *bytes.Buffer
 }
 
 // Exec spawn a container and wait for its output
@@ -40,7 +42,7 @@ func Exec(opts ExecOptions) (*ExecResult, error) {
 	ctx := context.Background()
 
 	filter := filters.NewArgs()
-	filter.Add("label", "belongs-to=fx")
+	filter.Add("label", "belong-to=fx")
 	filter.Add("name", opts.Name)
 	list, err := cli.ContainerList(ctx, types.ContainerListOptions{
 		Filters: filter,
@@ -63,7 +65,7 @@ func Exec(opts ExecOptions) (*ExecResult, error) {
 			AttachStdout: true,
 			Tty:          true,
 			StdinOnce:    true,
-			Labels:       map[string]string{"belongs-to": "fx"},
+			Labels:       map[string]string{"belong-to": "fx"},
 		}
 
 		hostConfig := &container.HostConfig{
@@ -91,46 +93,77 @@ func Exec(opts ExecOptions) (*ExecResult, error) {
 	}
 	fmt.Println("Started " + containerID)
 
+	connOut, err := attach(ctx, cli, 1, containerID)
+	if err != nil {
+		return nil, err
+	}
+	connErr, err := attach(ctx, cli, 2, containerID)
+	if err != nil {
+		return nil, err
+	}
+
+	var or bytes.Buffer
+	var er bytes.Buffer
+
+	go func() {
+		for {
+			_, oerr := io.Copy(&or, connOut.Reader)
+			if oerr != nil {
+				if oerr == io.EOF {
+					return
+				}
+				fmt.Printf("Fail stdout copy: %s\n", oerr.Error())
+			}
+		}
+	}()
+
+	go func() {
+		for {
+			_, eerr := io.Copy(&er, connErr.Reader)
+			if eerr != nil {
+				if eerr == io.EOF {
+					return
+				}
+				fmt.Printf("Fail stderr copy: %s\n", eerr.Error())
+			}
+		}
+	}()
+
+	_, err = cli.ContainerWait(ctx, containerID)
+	if err != nil {
+		return nil, err
+	}
+
+	return &ExecResult{
+		ID:     containerID,
+		Stdout: &or,
+		Stderr: &er,
+	}, err
+}
+
+func attach(ctx context.Context, cli *client.Client, std int, containerID string) (*types.HijackedResponse, error) {
+
+	stdout := false
+	stderr := false
+
+	if std == 1 {
+		stdout = true
+	}
+	if std == 2 {
+		stderr = true
+	}
+
 	attachConfig := types.ContainerAttachOptions{
-		Logs:   true,
-		Stdin:  true,
-		Stdout: true,
-		Stderr: true,
+		Logs:   false,
+		Stdin:  false,
+		Stdout: stdout,
+		Stderr: stderr,
 		Stream: true,
 	}
 	conn, err := cli.ContainerAttach(ctx, containerID, attachConfig)
 	if err != nil {
 		return nil, err
 	}
-	// defer conn.Close()
-	fmt.Println("Attached")
 
-	go func() {
-		for {
-			_, serr := io.Copy(os.Stdout, conn.Reader)
-			if serr != nil {
-				fmt.Printf("Fail copy: %s\n", serr.Error())
-				return
-			}
-		}
-
-	}()
-
-	// logsConfig := types.ContainerLogsOptions{
-	// 	ShowStdout: true,
-	// }
-	// out, err := cli.ContainerLogs(ctx, containerID, logsConfig)
-	// if err != nil {
-	// 	return nil, err
-	// }
-
-	// _, err = cli.ContainerWait(ctx, containerID)
-	// if err != nil {
-	// 	return nil, err
-	// }
-
-	return &ExecResult{
-		ID:     containerID,
-		Stdout: "",
-	}, err
+	return &conn, err
 }
