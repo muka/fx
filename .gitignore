@@ -5,4 +5,5 @@ build/
 *.pyc
 *.swp
 /fx
-tmp/
+/tmp
+node_modules
