@@ -165,6 +165,15 @@ func Remove(containerID string) (err error) {
 	return cli.ContainerRemove(context.Background(), containerID, types.ContainerRemoveOptions{Force: true})
 }
 
+// Kill kill a running container
+func Kill(containerID string) (err error) {
+	cli, err := getClient()
+	if err != nil {
+		return err
+	}
+	return cli.ContainerKill(context.Background(), containerID, "")
+}
+
 //ImageRemove remove docker image by imageID
 func ImageRemove(imageID string) (err error) {
 	cli, err := getClient()
