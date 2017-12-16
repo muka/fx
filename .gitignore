@@ -5,7 +5,8 @@ build/
 *.pyc
 *.swp
 /fx
-/tmp
-node_modules
+tmp/
 /coverage.txt
+/api/google
+node_modules
 /test/*.tar
