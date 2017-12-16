@@ -85,8 +85,11 @@ func Exec(opts ExecOptions) (*ExecResult, error) {
 		AttachStdout: true,
 		Tty:          true,
 		StdinOnce:    true,
-		Labels:       map[string]string{"belong-to": "fx"},
-		StopTimeout:  opts.Timeout,
+		Labels: map[string]string{
+			"belong-to": "fx",
+			"fx-type":   "container",
+		},
+		StopTimeout: opts.Timeout,
 	}
 
 	hostConfig := &container.HostConfig{
