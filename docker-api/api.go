@@ -17,15 +17,24 @@ type dockerInfo struct {
 	Stream string `json:"stream"`
 }
 
-var docekClient *client.Client
+var dockerClient *client.Client
+
+func init() {
+	go func() {
+		err := watchEvents()
+		if err != nil {
+			panic(err)
+		}
+	}()
+}
 
 func getClient() (*client.Client, error) {
-	if docekClient != nil {
-		return docekClient, nil
+	if dockerClient != nil {
+		return dockerClient, nil
 	}
 	var err error
-	docekClient, err = client.NewEnvClient()
-	return docekClient, err
+	dockerClient, err = client.NewEnvClient()
+	return dockerClient, err
 }
 
 // Pull image from hub.docker.com

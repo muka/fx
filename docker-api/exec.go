@@ -3,6 +3,7 @@ package docker
 import (
 	"bytes"
 	"io"
+	"time"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
@@ -13,7 +14,7 @@ import (
 	"fmt"
 )
 
-var defaultTimeout = 10
+var defaultTimeout int64 = 10
 
 //ExecOptions control how a container is executed
 type ExecOptions struct {
@@ -23,7 +24,7 @@ type ExecOptions struct {
 	Stdin     []byte
 	ImageName string
 	// Timeout in second to stop the container
-	Timeout *int
+	Timeout int64
 }
 
 //ExecResult return the execution results
@@ -41,9 +42,10 @@ func Exec(opts ExecOptions) (*ExecResult, error) {
 	}
 
 	ctx := context.Background()
-	// default to 10 sec TTL
-	if opts.Timeout == nil {
-		opts.Timeout = &defaultTimeout
+
+	// set default TTL
+	if opts.Timeout == 0 {
+		opts.Timeout = defaultTimeout
 	}
 
 	var cmd []string
@@ -89,7 +91,6 @@ func Exec(opts ExecOptions) (*ExecResult, error) {
 			"belong-to": "fx",
 			"fx-type":   "container",
 		},
-		StopTimeout: opts.Timeout,
 	}
 
 	hostConfig := &container.HostConfig{
@@ -136,10 +137,36 @@ func Exec(opts ExecOptions) (*ExecResult, error) {
 		}
 	}()
 
-	_, err = cli.ContainerWait(ctx, containerID)
-	if err != nil {
-		return nil, err
-	}
+	wait := make(chan bool, 1)
+
+	go func() {
+		d := time.Second * time.Duration(opts.Timeout)
+		time.Sleep(d)
+		kerr := Kill(containerID)
+		if kerr != nil {
+			fmt.Printf("Error on kill: %s", kerr.Error())
+		}
+		wait <- true
+	}()
+
+	go func() {
+		ch := getEventsChannel()
+		for {
+			select {
+			case ev := <-ch:
+				// fmt.Printf("%++v", ev)
+				if ev.ID == containerID {
+					if ev.Action == "die" {
+						wait <- true
+						return
+					}
+				}
+			}
+		}
+	}()
+
+	// sleep until something happens
+	<-wait
 
 	return &ExecResult{
 		ID:     containerID,

@@ -9,15 +9,18 @@ import (
 	"github.com/docker/docker/api/types/filters"
 )
 
-// Build builds a docker image from the image directory
 func TestBuild(t *testing.T) {
+	doBuild(t, "../test/hello", "fx/hello")
+}
+
+// Build builds a docker image from the image directory
+func doBuild(t *testing.T, srcPath, imageName string) {
 
 	cli, err := getClient()
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	srcPath := "../test/hello"
 	//HACK: for some reason docker complain about the symlink in node_modules/.bin
 	dotbin := srcPath + "/node_modules/.bin"
 	if _, serr := os.Stat(dotbin); !os.IsNotExist(serr) {
@@ -27,14 +30,13 @@ func TestBuild(t *testing.T) {
 		}
 	}
 
-	tag := "fx/hello"
-	err = Build(tag, srcPath)
+	err = Build(imageName, srcPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	f := filters.NewArgs()
-	f.Add("reference", tag)
+	f.Add("reference", imageName)
 	list, err := cli.ImageList(context.Background(), types.ImageListOptions{
 		Filters: f,
 	})
