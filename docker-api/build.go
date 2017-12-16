@@ -8,8 +8,6 @@ import (
 	"github.com/jhoonb/archivex"
 
 	"context"
-	"fmt"
-	"log"
 	"os"
 )
 
@@ -49,7 +47,6 @@ func Build(name string, dir string) error {
 	if buildErr != nil {
 		return buildErr
 	}
-	log.Println("build", buildResponse.OSType)
 	defer buildResponse.Body.Close()
 
 	scanner := bufio.NewScanner(buildResponse.Body)
@@ -59,7 +56,8 @@ func Build(name string, dir string) error {
 		if err != nil {
 			return err
 		}
-		fmt.Printf(info.Stream)
+		//TODO: add back with lower logging level
+		// fmt.Printf(info.Stream)
 	}
 
 	return nil

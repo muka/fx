@@ -18,8 +18,7 @@ func TestBuild(t *testing.T) {
 	}
 
 	srcPath := "../test/hello"
-	//HACK: for some reason docker complain about the symlink
-
+	//HACK: for some reason docker complain about the symlink in node_modules/.bin
 	dotbin := srcPath + "/node_modules/.bin"
 	if _, serr := os.Stat(dotbin); !os.IsNotExist(serr) {
 		err = os.RemoveAll(dotbin)

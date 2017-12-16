@@ -8,21 +8,22 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/network"
-	"github.com/docker/docker/client"
 
 	"context"
 	"fmt"
 )
 
+var defaultTimeout = 10
+
 //ExecOptions control how a container is executed
 type ExecOptions struct {
-	Name       string
-	Cmd        []string
-	Env        []string
-	Stdin      string
-	ImageName  string
-	Autoremove bool
-	Context    context.Context
+	Name      string
+	Cmd       []string
+	Env       []string
+	Stdin     []byte
+	ImageName string
+	// Timeout in second to stop the container
+	Timeout *int
 }
 
 //ExecResult return the execution results
@@ -40,91 +41,94 @@ func Exec(opts ExecOptions) (*ExecResult, error) {
 	}
 
 	ctx := context.Background()
+	// default to 10 sec TTL
+	if opts.Timeout == nil {
+		opts.Timeout = &defaultTimeout
+	}
 
-	filter := filters.NewArgs()
-	filter.Add("label", "belong-to=fx")
-	filter.Add("name", opts.Name)
-	list, err := cli.ContainerList(ctx, types.ContainerListOptions{
-		Filters: filter,
-	})
+	var cmd []string
+	if len(opts.Cmd) == 0 {
+		imgfilter := filters.NewArgs()
+		imgfilter.Add("reference", opts.ImageName)
+		listOptions := types.ImageListOptions{
+			All:     true,
+			Filters: imgfilter,
+		}
+		var imageID string
+		imageList, ilerr := cli.ImageList(ctx, listOptions)
+		if ilerr != nil {
+			return nil, ilerr
+		}
+		if len(imageList) == 1 {
+			imageID = imageList[0].ID
+		} else {
+			return nil, fmt.Errorf("Image not found %s", opts.ImageName)
+		}
+
+		imageInfo, _, iierr := cli.ImageInspectWithRaw(ctx, imageID)
+		if iierr != nil {
+			return nil, iierr
+		}
+
+		cmd = append(imageInfo.Config.Cmd, string(opts.Stdin))
+	} else {
+		cmd = append(opts.Cmd, string(opts.Stdin))
+	}
+
+	fmt.Printf("Creating container %s (from %s)\n", opts.Name, opts.ImageName)
+	containerConfig := &container.Config{
+		Cmd:          cmd,
+		Env:          opts.Env,
+		Image:        opts.ImageName,
+		AttachStdin:  false,
+		AttachStderr: true,
+		AttachStdout: true,
+		Tty:          true,
+		StdinOnce:    true,
+		Labels:       map[string]string{"belong-to": "fx"},
+		StopTimeout:  opts.Timeout,
+	}
+
+	hostConfig := &container.HostConfig{
+		AutoRemove: true,
+	}
+	netConfig := &network.NetworkingConfig{}
+	resp, cerr := cli.ContainerCreate(ctx, containerConfig, hostConfig, netConfig, opts.Name)
+	if cerr != nil {
+		return nil, cerr
+	}
+
+	containerID := resp.ID
+
+	attachConfig := types.ContainerAttachOptions{
+		Logs:   false,
+		Stdin:  false,
+		Stdout: true,
+		Stderr: true,
+		Stream: true,
+	}
+	conn, err := cli.ContainerAttach(ctx, containerID, attachConfig)
 	if err != nil {
 		return nil, err
 	}
-
-	var containerID string
-	if len(list) == 0 {
-
-		fmt.Printf("Creating container %s (from %s)\n", opts.Name, opts.ImageName)
-
-		containerConfig := &container.Config{
-			Cmd:          opts.Cmd,
-			Env:          opts.Env,
-			Image:        opts.ImageName,
-			AttachStdin:  true,
-			AttachStderr: true,
-			AttachStdout: true,
-			Tty:          true,
-			StdinOnce:    true,
-			Labels:       map[string]string{"belong-to": "fx"},
-		}
-
-		hostConfig := &container.HostConfig{
-			AutoRemove: opts.Autoremove,
-		}
-		netConfig := &network.NetworkingConfig{}
-		resp, cerr := cli.ContainerCreate(ctx, containerConfig, hostConfig, netConfig, opts.Name)
-		if cerr != nil {
-			return nil, cerr
-		}
-
-		containerID = resp.ID
-
-	} else {
-		containerID = list[0].ID
-	}
-
-	if opts.Context != nil {
-		ctx = opts.Context
-	}
+	// defer conn.Close()
 
 	startConfig := types.ContainerStartOptions{}
 	if err = cli.ContainerStart(ctx, containerID, startConfig); err != nil {
 		return nil, err
 	}
-	fmt.Println("Started " + containerID)
 
-	connOut, err := attach(ctx, cli, 1, containerID)
-	if err != nil {
-		return nil, err
-	}
-	connErr, err := attach(ctx, cli, 2, containerID)
-	if err != nil {
-		return nil, err
-	}
+	fmt.Printf("Started %s\n", containerID)
 
-	var or bytes.Buffer
-	var er bytes.Buffer
-
+	var outBuffer bytes.Buffer
 	go func() {
 		for {
-			_, oerr := io.Copy(&or, connOut.Reader)
-			if oerr != nil {
-				if oerr == io.EOF {
+			_, outBuffer := io.Copy(&outBuffer, conn.Reader)
+			if outBuffer != nil {
+				if outBuffer == io.EOF {
 					return
 				}
-				fmt.Printf("Fail stdout copy: %s\n", oerr.Error())
-			}
-		}
-	}()
-
-	go func() {
-		for {
-			_, eerr := io.Copy(&er, connErr.Reader)
-			if eerr != nil {
-				if eerr == io.EOF {
-					return
-				}
-				fmt.Printf("Fail stderr copy: %s\n", eerr.Error())
+				fmt.Printf("Fail stdout copy: %s\n", outBuffer.Error())
 			}
 		}
 	}()
@@ -136,34 +140,7 @@ func Exec(opts ExecOptions) (*ExecResult, error) {
 
 	return &ExecResult{
 		ID:     containerID,
-		Stdout: &or,
-		Stderr: &er,
+		Stdout: &outBuffer,
+		Stderr: nil,
 	}, err
-}
-
-func attach(ctx context.Context, cli *client.Client, std int, containerID string) (*types.HijackedResponse, error) {
-
-	stdout := false
-	stderr := false
-
-	if std == 1 {
-		stdout = true
-	}
-	if std == 2 {
-		stderr = true
-	}
-
-	attachConfig := types.ContainerAttachOptions{
-		Logs:   false,
-		Stdin:  false,
-		Stdout: stdout,
-		Stderr: stderr,
-		Stream: true,
-	}
-	conn, err := cli.ContainerAttach(ctx, containerID, attachConfig)
-	if err != nil {
-		return nil, err
-	}
-
-	return &conn, err
 }
