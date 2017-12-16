@@ -7,3 +7,5 @@ build/
 /fx
 /tmp
 node_modules
+/coverage.txt
+/test/*.tar

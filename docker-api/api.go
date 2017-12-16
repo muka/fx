@@ -42,9 +42,9 @@ func Pull(name string, verbose bool) error {
 	}
 
 	if verbose {
+		io.Copy(os.Stdout, r)
 	}
 
-	io.Copy(os.Stdout, r)
 	return nil
 }
 
@@ -84,7 +84,7 @@ func Deploy(name string, dir string, port string) (*container.ContainerCreateCre
 		return nil, err
 	}
 
-	fmt.Println(resp.ID)
+	fmt.Printf("Deployed to container %s\n", resp.ID)
 	return &resp, err
 }
 

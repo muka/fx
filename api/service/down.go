@@ -23,13 +23,29 @@ func newDownTask(val *api.DownMsgMeta, err error) downTask {
 //Down handle function removal requests
 func Down(req *api.DownRequest) (*api.DownResponse, error) {
 
-	containers := handlers.List(req.ID...)
+	// handle fx down *
+	var ids []string
+	if req.ID != nil && len(req.ID) > 0 {
+		if req.ID[0] != "*" {
+			ids = req.ID
+		}
+	}
+
+	containers, err := handlers.List(ids...)
+	if err != nil {
+		return nil, err
+	}
 	count := len(containers)
 	results := make(chan downTask, count)
+	downResponse := &api.DownResponse{}
+
+	if count == 0 {
+		return downResponse, nil
+	}
 
 	for _, c := range containers {
 		go func(container types.Container) {
-			results <- newDownTask(handlers.Down(container.ID[:10], container.Image))
+			results <- newDownTask(handlers.Down(container.ID[:10], container.ImageID))
 		}(c)
 	}
 
@@ -48,7 +64,6 @@ func Down(req *api.DownRequest) (*api.DownResponse, error) {
 		}
 	}
 
-	return &api.DownResponse{
-		Instances: downs,
-	}, nil
+	downResponse.Instances = downs
+	return downResponse, nil
 }
