@@ -3,15 +3,17 @@ package docker
 import (
 	"bytes"
 	"io"
+	"regexp"
 	"time"
+
+	"context"
+	"fmt"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/network"
-
-	"context"
-	"fmt"
+	"github.com/rs/xid"
 )
 
 var defaultTimeout int64 = 10
@@ -22,6 +24,7 @@ type ExecOptions struct {
 	Cmd       []string
 	Env       []string
 	Stdin     []byte
+	Args      []string
 	ImageName string
 	// Timeout in second to stop the container
 	Timeout int64
@@ -48,6 +51,18 @@ func Exec(opts ExecOptions) (*ExecResult, error) {
 		opts.Timeout = defaultTimeout
 	}
 
+	containerName := xid.New().String()
+	if opts.Name != "" {
+		containerName = opts.Name
+		reg, rerr := regexp.Compile("[^a-zA-Z0-9]+")
+		if rerr != nil {
+			return nil, rerr
+		}
+		containerName = reg.ReplaceAllString(containerName, "")
+	}
+
+	containerName = fmt.Sprintf("fx_%s", containerName)
+
 	var cmd []string
 	if len(opts.Cmd) == 0 {
 		imgfilter := filters.NewArgs()
@@ -72,12 +87,12 @@ func Exec(opts ExecOptions) (*ExecResult, error) {
 			return nil, iierr
 		}
 
-		cmd = append(imageInfo.Config.Cmd, string(opts.Stdin))
+		cmd = append(imageInfo.Config.Cmd, opts.Args...)
 	} else {
-		cmd = append(opts.Cmd, string(opts.Stdin))
+		cmd = append(opts.Cmd, opts.Args...)
 	}
 
-	fmt.Printf("Creating container %s (from %s)\n", opts.Name, opts.ImageName)
+	fmt.Printf("Creating container %s (from %s)\n", containerName, opts.ImageName)
 	containerConfig := &container.Config{
 		Cmd:          cmd,
 		Env:          opts.Env,
@@ -97,7 +112,7 @@ func Exec(opts ExecOptions) (*ExecResult, error) {
 		AutoRemove: true,
 	}
 	netConfig := &network.NetworkingConfig{}
-	resp, cerr := cli.ContainerCreate(ctx, containerConfig, hostConfig, netConfig, opts.Name)
+	resp, cerr := cli.ContainerCreate(ctx, containerConfig, hostConfig, netConfig, containerName)
 	if cerr != nil {
 		return nil, cerr
 	}

@@ -33,9 +33,9 @@ func TestExecWithArgs(t *testing.T) {
 
 	hello := "world"
 	opts := ExecOptions{
-		Name:      "exec_test_hello",
+		Name:      "exec_test_hello_args",
 		ImageName: "fx/hello",
-		Stdin:     []byte(hello),
+		Args:      []string{hello},
 	}
 
 	res, err := Exec(opts)
@@ -64,7 +64,7 @@ func TestExecWithTimeout(t *testing.T) {
 	opts := ExecOptions{
 		Name:      "exec_test_timeout",
 		ImageName: imageName,
-		Stdin:     []byte("test"),
+		Args:      []string{"timeout test"},
 		Timeout:   2,
 	}
 
