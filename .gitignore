@@ -6,7 +6,7 @@ build/
 *.swp
 /fx
 tmp/
-/coverage.txt
 /api/google
+/coverage.txt
 node_modules
 /test/*.tar
